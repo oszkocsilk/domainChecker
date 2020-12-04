@@ -1,0 +1,228 @@
+function onOpen() {
+  // The function that run at the open. It creates a custom menu.
+  var ui = SpreadsheetApp.getUi();
+  
+  ui.createMenu("Share Check")
+  .addItem("Check Folders", "folderDomainCheck")
+  .addItem("Check All", "allDomainCheck")
+  .addItem("Help", "helpButton")
+  .addToUi();
+}
+
+
+
+// validDomains will contain the domains that we can use.
+var validDomains = getValidDomains();
+
+// foldersSharedWithInvalidDomains will contain the folder names that have been shared with domains, that are not is "Domains" sheet.
+var foldersSharedWithInvalidDomains=[];
+
+// filesSharedWithInvalidDomains will contain the file names that have been shared with domains, that are not is "Domains" sheet.
+var filesSharedWithInvalidDomains=[];
+
+// hrefs will contain the links for the files and folders, that have been shared with domains, that are not is "Domains" sheet.
+var hrefs=[];
+
+
+
+function folderDomainCheck(){
+  // Checks the folders for invalid domains.
+  var invalidEmails=[];
+  
+  invalidEmails = getEditors(invalidEmails);
+  dataAdder(invalidEmails);
+  createPivotTable(invalidEmails);
+}
+
+
+
+function helpButton(){
+  // Displays a message to the UI to explain what the Share Check does.
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.alert("This menu tab helps you to see your folders OR your folders and files, which you have been shared with users with disabled domains "
+                          +"(disabled domains means that not part of \"Domains\" sheet)."
+                          +"\n\nTo see only just the folders shared with disabled domained emails, click on \"Check Folders\" button below \n\"Share Check\" to start it."
+                          +"\n\nTo see the folders and the files shared with disabled domained emails, click on \"Check All\" button below \n\"Share Check\" to start it.");
+}
+
+
+
+function allDomainCheck() {
+  // Checks the files and folders for invalid domains.
+  var invalidEmails=[];
+  invalidEmails = getEditors(invalidEmails);
+  fileEditors(invalidEmails);
+  dataAdder(invalidEmails);
+  
+  createPivotTable(invalidEmails);
+}
+
+
+
+function getValidDomains(){
+  // Creates a list of the valid domains by iterating on "Domains" sheet.
+  var domainsSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Domains");
+  var domains = domainsSheet.getDataRange().getValues();
+  var validDomains=[];
+  domains[0].pop();
+  for(i=0; i<domains.length; i++){   
+    validDomains[i]=domains[i].toString();
+    Logger.log(domains[i])
+  }
+  return validDomains;
+}
+
+
+
+function getEditors(invalidEmails) {
+  // Returns the domain of every editor of every folder in the user's Drive, who's domain is invalid by iterating on the folders to get the emails,
+  // that the folder shared with, than checking that are thay in the list of valid domains.
+  var folders = DriveApp.getFolders();
+  
+  while (folders.hasNext()) {
+    var folder = folders.next();
+    var editors1 = folder.getEditors();
+    for (var i = 0; i < editors1.length; i++) {
+      if( !( validDomains.includes( editors1[i].getDomain() ) ) ){
+        invalidEmails[invalidEmails.length] = editors1[i].getEmail();
+        foldersSharedWithInvalidDomains[foldersSharedWithInvalidDomains.length] = folder.getName();
+        hrefs[hrefs.length]=folder.getUrl();
+      } 
+    }
+  }
+  return invalidEmails;
+}
+
+
+
+function fileEditors(invalidEmails){
+  // Returns the emails of every editor of every file in the user's Drive, who's domain is invalid by iterating on the files to get the emails,
+  // that the folder shared with, than checking that are thay in the list of valid domains.
+  var files = DriveApp.getFiles();
+  
+  while (files.hasNext()) {
+    var file = files.next();
+    var editors = file.getEditors();
+    for (var i = 0; i < editors.length; i++) {
+      if( !( validDomains.includes( editors[i].getDomain() ) ) ){
+        invalidEmails[invalidEmails.length] = editors[i].getEmail();
+        filesSharedWithInvalidDomains[filesSharedWithInvalidDomains.length] = file.getName();
+        hrefs[hrefs.length]=file.getUrl();
+        
+      }
+    }
+  }
+}
+
+
+
+function dataAdder(invalidEmails){
+  // Delets all informations on the sheet and adds the new ones from the saved lists.
+  var activeSheet=setActiveSheet("invalid users");
+  var j=0;
+  activeSheet.getRange("A1:B"+invalidEmails.length+1).setValue("");
+  activeSheet.getRange("A1").setValue("Email addresses");
+  activeSheet.getRange("B1").setValue("Folders and files");
+  for(var i=2; i<invalidEmails.length+2;i++){
+    activeSheet.getRange("A"+i).setValue(invalidEmails[i-2]);
+    if(i<=foldersSharedWithInvalidDomains.length+1){
+      activeSheet.getRange("B"+(i)).setValue("=HYPERLINK(\" "+ hrefs[i-2]+" \"; \" "+foldersSharedWithInvalidDomains[i-2]+" \" )");
+    }
+    else{
+      activeSheet.getRange("B"+(i)).setValue("=HYPERLINK(\" "+ hrefs[i-2]+" \"; \" "+filesSharedWithInvalidDomains[j]+" \" )");
+      j++;
+    }
+  }
+}
+
+
+
+function setActiveSheet(name){
+  // Gets a name and sets to active sheet.
+  var app=SpreadsheetApp;
+  var ss = app.getActiveSpreadsheet().getSheetByName(name);
+  return ss;
+}
+
+
+
+function createPivotTable(invalidEmails){
+  // Creates a pivot table from the "invalid users" sheet.
+  var activeSheet=setActiveSheet("Pivot table");
+  activeSheet.getRange("A2:B"+invalidEmails.length).setValue("");
+  activeSheet=setActiveSheet("invalid users");
+  
+  // sourceSheetId is contains the id of the source Sheet.
+  var sourceSheetId = SpreadsheetApp.getActiveSpreadsheet().getSheets()[1].getSheetId();
+  
+  // targetSheetId is contains the id of the target Sheet.
+  var targetSheetId = SpreadsheetApp.getActiveSpreadsheet().getSheets()[2].getSheetId();
+  
+  // pivotTbale creates a new pivot table.
+  var pivotTable = Sheets.newPivotTable();
+  
+  // endRowIndex is the length of the datas what we need.
+  var endRowIndex = (invalidEmails.length+1);
+  
+  // resource contains the JSON formated pivot table.
+  var resource = {
+    "requests": [
+      {
+        "updateCells": {
+          "rows": [
+            {
+              "values": [
+                {
+                  "pivotTable": {
+                    "source": {
+                      "sheetId": sourceSheetId,
+                      "startRowIndex": 0,
+                      "startColumnIndex": 0,
+                      "endColumnIndex": 2,
+                      "endRowIndex": endRowIndex
+                    },
+                    "rows": [
+                      {
+                        "sourceColumnOffset": 0,
+                        "showTotals": false,
+                        "sortOrder": "ASCENDING"
+                      },
+                      {
+                        "sourceColumnOffset": 1,
+                        "showTotals": false,
+                        "sortOrder": "ASCENDING"
+                      }
+                    ],
+                    "valueLayout": "VERTICAL"
+                  }
+                }
+              ]
+            },
+            {}
+          ],
+          "start": {
+            "sheetId": targetSheetId,
+            "rowIndex": 0,
+            "columnIndex": 0
+          },
+          "fields": "pivotTable"
+        }
+      }
+    ]
+  };
+  
+  // cellData contains the data of the cells.
+  var cellData = Sheets.newCellData();
+  cellData.pivotTable = pivotTable;
+  
+  // rows gets the values from the source Sheet.
+  var rows = Sheets.newRowData();
+  rows.values = cellData;
+  
+  // Batch update our spreadsheet
+  var response = Sheets.Spreadsheets.batchUpdate(resource, SpreadsheetApp.getActive().getId());
+}
+
+
+
+
